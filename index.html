@@ -34,7 +34,7 @@
             max-width: 85%; 
             position: relative; 
             cursor: pointer;
-            white-space: pre-wrap; /* 确保原始换行被保留 */
+            white-space: pre-wrap;
             word-break: break-word;
         }
                 .ai-msg { border: 1px solid #f0f0f0; border-radius: 18px 18px 18px 4px; padding: 1rem; margin-right: auto; max-width: 85%; background: white; min-width: 0; }
@@ -47,7 +47,7 @@
         .attach-item { padding: 12px 20px; font-size: 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: background 0.2s; }
         .attach-item:hover { background: #f9f9f7; }
 
-        /* 附件预览区域：修改为横向滚动，不换行 */
+        /* 附件预览区域 */
         #attachment-preview { 
             display: flex; 
             gap: 10px; 
@@ -57,10 +57,8 @@
             scroll-behavior: smooth;
             -webkit-overflow-scrolling: touch;
         }
-        /* 隐藏滚动条但保留功能 */
         #attachment-preview::-webkit-scrollbar { display: none; }
         
-        /* 调整文件预览卡片：固定宽度防止挤压 */
         .file-card-preview {
             background: #ffffff;
             border: 1px solid #e5e7eb;
@@ -72,8 +70,8 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.03);
             cursor: pointer;
             transition: all 0.2s;
-            width: 190px; /* 固定宽度 */
-            flex-shrink: 0; /* 禁止缩小 */
+            width: 190px;
+            flex-shrink: 0;
             position: relative;
             user-select: none;
         }
@@ -174,16 +172,45 @@
         .artifact-dl { background: white; border: 1px solid #e0e0da; border-radius: 10px; padding: 8px 16px; font-size: 12px; color: #333; cursor: pointer; flex-shrink: 0; transition: all 0.2s; }
         .artifact-dl:hover { background: #f0f0eb; }
 
-        /* 新增：Artifact 加载圆圈 */
+        /* Artifact 加载圆圈 - 改为更平滑的动画 */
         .artifact-spinner {
-            width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top-color: #1a1a1a; border-radius: 50%;
-            animation: art-spin 0.8s linear infinite; display: none; margin-right: 10px;
+            width: 18px; height: 18px; border: 2px solid #e5e7eb; border-top-color: #1a1a1a; border-radius: 50%;
+            animation: art-spin 1s linear infinite;
+            display: none;
+            margin-right: 10px;
+            flex-shrink: 0;
         }
         @keyframes art-spin { to { transform: rotate(360deg); } }
-        /* 生成中状态：显示圆圈并隐藏下载按钮，隐藏默认的竖线光标 */
-        .streaming .artifact-card:last-child .artifact-spinner { display: block; }
-        .streaming .artifact-card:last-child .artifact-dl { display: none; }
-        .streaming .markdown-content > .artifact-card:last-child::after { content: none !important; }
+
+        /* 流式加载指示器 - 独立于 markdown 内容，不会被 innerHTML 覆盖 */
+        .stream-artifact-indicator {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: #f8f8f6;
+            border: 1px solid #e8e8e4;
+            border-radius: 16px;
+            padding: 14px 16px;
+            margin: 10px 0;
+            user-select: none;
+        }
+        .stream-artifact-indicator .artifact-icon {
+            width: 42px; height: 50px; background: white; border: 1px solid #e8e8e4; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center; font-size: 12px; color: #9ca3af;
+            flex-shrink: 0; transform: rotate(-4deg); box-shadow: 2px 3px 8px rgba(0,0,0,0.07);
+            font-family: monospace; font-weight: 700; letter-spacing: -1px;
+        }
+        .stream-artifact-indicator .artifact-info { flex: 1; min-width: 0; }
+        .stream-artifact-indicator .artifact-title { font-size: 13px; font-weight: 500; color: #1a1a1a; }
+        .stream-artifact-indicator .artifact-meta { font-size: 11px; color: #9ca3af; margin-top: 3px; }
+        .stream-artifact-indicator .indicator-spinner {
+            width: 18px; height: 18px;
+            border: 2px solid #e5e7eb;
+            border-top-color: #1a1a1a;
+            border-radius: 50%;
+            animation: art-spin 1s linear infinite;
+            flex-shrink: 0;
+        }
 
         /* 思考动画 */
         .thinking-indicator {
@@ -231,7 +258,8 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0; }
         }
-        .streaming .markdown-content > *:last-child::after {
+        /* 流式光标：仅对非 artifact-card 的最后一个子元素显示 */
+        .streaming .markdown-content > *:last-child:not(.artifact-card)::after {
             content: '';
             display: inline-block;
             width: 2px;
@@ -328,7 +356,6 @@
         </div>
 
         <div class="input-section">
-            <!-- 限制预览区域的最大宽度与下方对齐 -->
             <div class="max-w-4xl mx-auto">
                 <div id="attachment-preview" class="no-scrollbar"></div>
             </div>
@@ -414,28 +441,25 @@
         };
 
         let config = JSON.parse(localStorage.getItem('studio_v15_config')) || { url: '', key: '', model: '' };
-        let sessions = []; // 异步加载，初始化为空
+        let sessions = [];
         let currentSessionId = null;
         let allModels = JSON.parse(localStorage.getItem('studio_all_models')) || [];
         let isGenerating = false;
         let currentAbortController = null;
-        let pendingAttachments = []; // 存储待发送的附件
+        let pendingAttachments = [];
 
-        // 默认系统提示词，强制中文输出
         const DEFAULT_SYSTEM_PROMPT = '请始终使用中文回复用户。无论用户使用什么语言提问，你的回答都应该使用简体中文，除非用户明确要求使用其他语言。代码、专有名词、技术术语可以保留英文原文。';
 
-                // 1. 代码渲染器：缓存原始代码，彻底避免 Base64 编码中文字符报错以及换行格式丢失
+        // 代码渲染器
         const renderer = new marked.Renderer();
         renderer.code = function(token) {
             let code = typeof token === 'object' ? (token.text || token.raw || '') : token;
             let lang = typeof token === 'object' ? (token.lang || '') : (arguments[1] || '');
             const id = 'code-' + Math.random().toString(36).substr(2, 9);
             
-            // 将原始、换行保留完整的代码存入全局对象中，不受 CSS 视觉折叠或换行的影响
             window.rawCodeBlocks = window.rawCodeBlocks || {};
             window.rawCodeBlocks[id] = code;
             
-            // 使用 highlight.js 对代码进行彩色高亮处理
             let highlightedCode;
             if (lang && hljs.getLanguage(lang)) {
                 try {
@@ -450,31 +474,26 @@
             if (lang && lang.toLowerCase() === 'html') {
                 const titleMatch = code.match(/<title[^>]*>(.*?)<\/title>/i);
                 const docTitle = titleMatch ? titleMatch[1].trim() : '新文档';
-                // 这里在 title 后面加入了 artifact-spinner 容器
-                return `<div class="artifact-card" onclick="previewHtmlArtifact('${id}')">
+                return `<div class="artifact-card" data-code-id="${id}" onclick="previewHtmlArtifact('${id}')">
                     <div class="artifact-icon">&lt;/&gt;</div>
                     <div class="artifact-info">
                         <div class="artifact-title">${docTitle}</div>
                         <div class="artifact-meta">代码 · HTML</div>
                     </div>
-                    <div class="artifact-spinner"></div>
                     <button onclick="downloadHtmlArtifact('${id}', event)" class="artifact-dl">下载</button>
                 </div>`;
             }
 
             return `<div class="code-card"><div class="code-header"><span>${lang || '代码'}</span><button onclick="copyCode('${id}')">复制</button></div><div class="code-body"><div id="${id}" class="code-content"><pre><code class="hljs ${lang}">${highlightedCode}</code></pre></div><div class="code-mask"></div></div><div class="code-toggle" onclick="toggleCode(this)">展开 ∨</div></div>`;
         };
-        // 开启 breaks: true 以支持单行换行符转换为 <br>
         marked.use({ 
             renderer,
             breaks: true,
             gfm: true
         });
 
-        // 2. 复制代码函数：优先从全局缓存读取原始代码
         function copyCode(id) {
             const text = (window.rawCodeBlocks && window.rawCodeBlocks[id]) ? window.rawCodeBlocks[id] : document.getElementById(id).innerText;
-            
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(text)
                     .then(() => alert("已复制"))
@@ -484,7 +503,6 @@
             }
         }
 
-        // 3. 复制兼容备用方案（用于本地 file:// 协议）
         function fallbackCopy(text) {
             const textArea = document.createElement("textarea");
             textArea.value = text;
@@ -550,36 +568,22 @@
             input.value = ''; 
         }
 
-        // 新增：处理粘贴文本自动转小方块
         function handlePaste(event) {
             const clipboardData = event.clipboardData || window.clipboardData;
             const pastedText = clipboardData.getData('text');
             
-            // 定义触发阈值：长度超过 800 字符，或者包含明显的代码特征（如大量缩进、大括号、特定关键字）
             const isLongText = pastedText.length > 800;
             const isCode = /[\{\}\[\];]/.test(pastedText) && (pastedText.includes('function') || pastedText.includes('var ') || pastedText.includes('const ') || pastedText.includes('import ') || pastedText.includes('def ') || pastedText.includes('<div'));
 
             if (isLongText || isCode) {
-                // 阻止默认粘贴行为（不让文字进入输入框）
                 event.preventDefault();
-                
-                // 提取标题：取第一行或前 20 个字符
                 let firstLine = pastedText.trim().split('\n')[0].substring(0, 30);
                 const fileName = isCode ? `代码片段: ${firstLine}...` : `长文本: ${firstLine}...`;
-                
-                // 将粘贴内容作为虚拟文件放入附件栏
-                pendingAttachments.push({ 
-                    type: 'file', 
-                    name: fileName, 
-                    data: pastedText 
-                });
-                
-                // 渲染预览方块
+                pendingAttachments.push({ type: 'file', name: fileName, data: pastedText });
                 renderAttachments();
             }
         }
 
-        // 渲染横向滚动的预览卡片
         function renderAttachments() {
             const container = document.getElementById('attachment-preview');
             if (pendingAttachments.length === 0) {
@@ -600,38 +604,27 @@
                     </button>
                 </div>
             `).join('');
-            // 自动滚动到最右侧
             container.scrollLeft = container.scrollWidth;
         }
 
         function removeAttachment(i, event) {
-            if (event) event.stopPropagation(); // 阻止触发预览
+            if (event) event.stopPropagation();
             pendingAttachments.splice(i, 1);
             renderAttachments();
         }
 
-        // 打开预览模态框查看长代码或文档内容
         function previewAttachment(i) {
             const at = pendingAttachments[i];
             if (!at) return;
-
             document.getElementById('modal-file-icon').innerText = at.type === 'image' ? '🖼️' : '📄';
             document.getElementById('modal-file-name').innerText = at.name;
             const body = document.getElementById('modal-file-body');
-
             if (at.type === 'image') {
                 body.innerHTML = `<div class="flex justify-center items-center"><img src="${at.data}" class="max-w-full max-h-[60vh] rounded-xl border border-gray-100 shadow-sm" /></div>`;
             } else {
-                // 安全转义 HTML 标记防止破坏DOM结构
-                const safeContent = at.data
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;")
-                    .replace(/"/g, "&quot;")
-                    .replace(/'/g, "&#039;");
+                const safeContent = at.data.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
                 body.innerHTML = `<pre class="font-mono text-xs bg-[#f9f9f7] text-gray-800 p-4 rounded-xl overflow-x-auto whitespace-pre-wrap break-all border border-gray-100"><code>${safeContent}</code></pre>`;
             }
-
             document.getElementById('file-preview-modal').classList.remove('hidden');
         }
 
@@ -639,23 +632,14 @@
             document.getElementById('file-preview-modal').classList.add('hidden');
         }
 
-        function extractFileData(content, filename) {
-            const safe = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const match = content.match(new RegExp('--- 导入文件: ' + safe + ' ---\\n```\\n([\\s\\S]*?)\\n```'));
-            return match ? match[1] : null;
-        }
-
         function previewMsgFile(name, data) {
             document.getElementById('modal-file-icon').innerText = '📄';
             document.getElementById('modal-file-name').innerText = name;
-            const safeContent = data
-                .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+            const safeContent = data.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
             document.getElementById('modal-file-body').innerHTML = `<pre class="font-mono text-xs bg-[#f9f9f7] text-gray-800 p-4 rounded-xl overflow-x-auto whitespace-pre-wrap break-all border border-gray-100"><code>${safeContent}</code></pre>`;
             document.getElementById('file-preview-modal').classList.remove('hidden');
         }
 
-        // --- 文本折叠控制控制函数 ---
         function toggleFold(btn) {
             const limiter = btn.previousElementSibling;
             if (limiter.classList.contains('collapsed')) {
@@ -677,7 +661,6 @@
             }
         }
 
-        // 生成思考动画 HTML
         function getThinkingHTML() {
             return `<div class="thinking-indicator">
                 <div class="thinking-dots"><span></span><span></span><span></span></div>
@@ -685,10 +668,64 @@
             </div>`;
         }
 
-        // --- 流式渲染节流器 ---
+        // --- 流式渲染节流器（核心改造：独立 spinner 不被 innerHTML 覆盖）---
         function createStreamRenderer(mdContainer, bubble) {
             let pendingRender = false;
             let currentText = '';
+            // 独立的 artifact 加载指示器，挂载在 mdContainer 之外
+            let artifactIndicator = null;
+            
+            // 检测当前文本是否正在流式生成一个未闭合的 html 代码块
+            function detectStreamingHtmlBlock(text) {
+                // 查找最后一个 ```html 开头且没有对应闭合 ``` 的代码块
+                const lastHtmlStart = text.lastIndexOf('```html');
+                if (lastHtmlStart === -1) return null;
+                
+                // 从 ```html 之后查找闭合的 ```
+                const afterStart = text.substring(lastHtmlStart + 7); // skip "```html"
+                // 查找独立行的 ``` 作为结束标记
+                const closeMatch = afterStart.match(/\n```(\s*\n|$)/);
+                if (closeMatch) return null; // 已闭合
+                
+                // 提取已有的部分代码来获取 title
+                const partialCode = afterStart.replace(/^\n/, '');
+                const titleMatch = partialCode.match(/<title[^>]*>(.*?)<\/title>/i);
+                return {
+                    title: titleMatch ? titleMatch[1].trim() : '正在生成...',
+                    hasTitle: !!titleMatch
+                };
+            }
+            
+            function updateIndicator(text) {
+                const htmlBlock = detectStreamingHtmlBlock(text);
+                
+                if (htmlBlock) {
+                    // 正在流式生成 HTML 代码块，显示独立的指示器
+                    if (!artifactIndicator) {
+                        artifactIndicator = document.createElement('div');
+                        artifactIndicator.className = 'stream-artifact-indicator';
+                        artifactIndicator.innerHTML = `
+                            <div class="artifact-icon">&lt;/&gt;</div>
+                            <div class="artifact-info">
+                                <div class="artifact-title">正在生成...</div>
+                                <div class="artifact-meta">代码 · HTML</div>
+                            </div>
+                            <div class="indicator-spinner"></div>
+                        `;
+                        // 插到 mdContainer 后面（同级），这样不受 innerHTML 重写影响
+                        mdContainer.parentNode.insertBefore(artifactIndicator, mdContainer.nextSibling);
+                    }
+                    // 更新标题
+                    const titleEl = artifactIndicator.querySelector('.artifact-title');
+                    if (titleEl) titleEl.textContent = htmlBlock.title;
+                } else {
+                    // 没有未闭合的 HTML 代码块，移除指示器
+                    if (artifactIndicator) {
+                        artifactIndicator.remove();
+                        artifactIndicator = null;
+                    }
+                }
+            }
             
             return {
                 update(text) {
@@ -696,7 +733,18 @@
                     if (!pendingRender) {
                         pendingRender = true;
                         requestAnimationFrame(() => {
-                            mdContainer.innerHTML = marked.parse(currentText);
+                            // 渲染 markdown（不包含未闭合的 html 代码块部分，避免半成品渲染）
+                            const htmlBlock = detectStreamingHtmlBlock(currentText);
+                            if (htmlBlock) {
+                                // 只渲染到最后一个 ```html 之前的内容
+                                const lastHtmlStart = currentText.lastIndexOf('```html');
+                                const safeText = currentText.substring(0, lastHtmlStart);
+                                mdContainer.innerHTML = marked.parse(safeText);
+                            } else {
+                                mdContainer.innerHTML = marked.parse(currentText);
+                            }
+                            // 更新独立的 artifact 指示器
+                            updateIndicator(currentText);
                             pendingRender = false;
                             const chatWin = document.getElementById('chat-window');
                             chatWin.scrollTop = chatWin.scrollHeight;
@@ -705,6 +753,11 @@
                 },
                 finalize(text) {
                     currentText = text;
+                    // 移除指示器
+                    if (artifactIndicator) {
+                        artifactIndicator.remove();
+                        artifactIndicator = null;
+                    }
                     mdContainer.innerHTML = marked.parse(currentText);
                     if (bubble) bubble.classList.remove('streaming');
                 }
@@ -1007,7 +1060,6 @@
                 : msgObj.content;
 
             if (role === 'user') {
-                // 用户消息：在气泡上方显示附件小卡片
                 const files = _ver.files || [];
                 const images = _ver.images || [];
 
@@ -1018,10 +1070,7 @@
                     files.forEach((f, fi) => {
                         const card = document.createElement('div');
                         card.className = 'flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm cursor-pointer hover:border-gray-400 transition-all';
-                        card.innerHTML = `
-                            <span class="text-base">📄</span>
-                            <span class="text-[11px] text-gray-600 max-w-[120px] truncate">${f.name}</span>
-                        `;
+                        card.innerHTML = `<span class="text-base">📄</span><span class="text-[11px] text-gray-600 max-w-[120px] truncate">${f.name}</span>`;
                         card.onclick = (e) => { e.stopPropagation(); previewMsgFile(f.name, f.data); };
                         attachRow.appendChild(card);
                     });
@@ -1043,7 +1092,6 @@
                     wrap.appendChild(attachRow);
                 }
 
-                // 渲染文本气泡
                 bubble.innerHTML = marked.parse(content);
                 bubble.onclick = () => { if(!isGenerating) editMessage(idx); };
 
@@ -1149,7 +1197,6 @@
             if (isGenerating) return;
             const session = sessions.find(s => s.id === currentSessionId);
             if (!session) return;
-            
             const userMsgIdx = idx - 1;
             if (userMsgIdx >= 0 && session.messages[userMsgIdx]) {
                 session.messages = session.messages.slice(0, idx);
@@ -1158,18 +1205,14 @@
             }
         }
 
-        // ★★★ 修复核心：编辑消息时保留原版本的文件附件数据 ★★★
         function editMessage(idx) {
             const session = sessions.find(s => s.id === currentSessionId);
             const msg = session.messages[idx];
             const ver = msg.versions[msg.activeIdx];
-            
-            // 提取内容
             const currentText = ver.displayText !== undefined 
                 ? ver.displayText 
                 : ver.content.replace(/\n\n---\s*导入文件:[\s\S]*/g, '').trim();
 
-            // 创建临时多行编辑 UI
             const overlay = document.createElement('div');
             overlay.className = 'fixed inset-0 z-[6000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4';
             overlay.innerHTML = `
@@ -1186,7 +1229,6 @@
             const textarea = document.getElementById('temp-edit-area');
             textarea.focus();
 
-            // 处理确认逻辑
             const handleConfirm = () => {
                 const nextText = textarea.value.trim();
                 if (nextText && nextText !== currentText) {
@@ -1194,7 +1236,6 @@
                     const fileSection = ver.content.match(/(\n\n---\s*导入文件:[\s\S]*)$/);
                     const preservedFiles = fileSection ? fileSection[1] : '';
                     const newContent = nextText + preservedFiles;
-                    
                     msg.versions.push({ 
                         content: newContent, 
                         displayText: nextText, 
@@ -1238,7 +1279,6 @@
             `).join('');
         }
         function saveSessions() {
-            // 直接保存完整 sessions，不进行任何裁剪或删除
             db.save(sessions);
             renderHistoryList();
         }
@@ -1304,12 +1344,10 @@
         async function autoRenameSession(id) {
             const session = sessions.find(x => x.id === id);
             if (!session || session.messages.length === 0) return;
-
             const sampleText = session.messages.slice(0, 2).map(m => {
                 const text = m.role === 'user' ? (m.versions[m.activeIdx]?.content || '') : m.content;
                 return `${m.role === 'user' ? '用户' : 'AI'}: ${text}`;
             }).join('\n');
-
             try {
                 const res = await fetch(`${config.url.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST',
@@ -1323,7 +1361,6 @@
                         max_tokens: 30
                     })
                 });
-                
                 const data = await res.json();
                 if (data.choices && data.choices[0].message.content) {
                     const cleanTitle = data.choices[0].message.content.trim().replace(/[。！？，、""""''「」]/g, '');
