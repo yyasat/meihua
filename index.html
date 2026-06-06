@@ -426,21 +426,47 @@
             name: 'StudioAI_DB',
             store: 'chat_sessions',
             async init() {
-                return new Promise((resolve) => {
+                // 关键修复：向浏览器申请「持久化存储」权限。
+                // 不申请的话，浏览器（尤其 iOS Safari / 手机浏览器 / 隐私模式）
+                // 会在长时间不访问后，把 IndexedDB 当成临时数据自动清空，导致历史记录丢失。
+                try {
+                    if (navigator.storage && navigator.storage.persist) {
+                        const already = await navigator.storage.persisted();
+                        if (!already) {
+                            const granted = await navigator.storage.persist();
+                            console.log('持久化存储申请结果:', granted);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('持久化存储申请失败（不影响使用）:', e);
+                }
+                return new Promise((resolve, reject) => {
                     const request = indexedDB.open(this.name, 1);
                     request.onupgradeneeded = (e) => e.target.result.createObjectStore(this.store);
                     request.onsuccess = (e) => { this.instance = e.target.result; resolve(); };
+                    request.onerror = (e) => { console.error('数据库打开失败:', e); reject(e); };
                 });
             },
             async save(data) {
-                const tx = this.instance.transaction(this.store, 'readwrite');
-                tx.objectStore(this.store).put(JSON.parse(JSON.stringify(data)), 'all_history');
+                // 改为等事务真正完成再返回，避免页面关闭过快导致数据没写进去
+                return new Promise((resolve, reject) => {
+                    try {
+                        const tx = this.instance.transaction(this.store, 'readwrite');
+                        tx.objectStore(this.store).put(JSON.parse(JSON.stringify(data)), 'all_history');
+                        tx.oncomplete = () => resolve();
+                        tx.onerror = (e) => { console.error('数据保存失败:', e); reject(e); };
+                    } catch (e) {
+                        console.error('数据保存异常:', e);
+                        reject(e);
+                    }
+                });
             },
             async load() {
                 return new Promise((resolve) => {
                     const tx = this.instance.transaction(this.store, 'readonly');
                     const request = tx.objectStore(this.store).get('all_history');
                     request.onsuccess = () => resolve(request.result || []);
+                    request.onerror = () => resolve([]);
                 });
             }
         };
